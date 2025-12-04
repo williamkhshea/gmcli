@@ -28,7 +28,7 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["src/**/*", "*.json", "*.md"],
+		"include": ["src/**/*", "*.json", "*.md"],
 		"ignore": ["node_modules", "dist"]
 	}
 }

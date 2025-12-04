@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import * as http from "http";
 import type { AddressInfo } from "net";
+import * as readline from "readline";
 import * as url from "url";
 import { OAuth2Client } from "google-auth-library";
 
@@ -22,8 +23,8 @@ export class GmailOAuthFlow {
 		this.oauth2Client = new OAuth2Client(clientId, clientSecret);
 	}
 
-	async authorize(): Promise<string> {
-		const result = await this.startAuthFlow();
+	async authorize(manual = false): Promise<string> {
+		const result = manual ? await this.startManualFlow() : await this.startAuthFlow();
 		if (!result.success) {
 			throw new Error(result.error || "Authorization failed");
 		}
@@ -31,6 +32,43 @@ export class GmailOAuthFlow {
 			throw new Error("No refresh token received");
 		}
 		return result.refreshToken;
+	}
+
+	private async startManualFlow(): Promise<AuthResult> {
+		const redirectUri = "http://localhost:1";
+		this.oauth2Client = new OAuth2Client(this.oauth2Client._clientId, this.oauth2Client._clientSecret, redirectUri);
+
+		const authUrl = this.oauth2Client.generateAuthUrl({
+			access_type: "offline",
+			scope: SCOPES,
+		});
+
+		console.log("Visit this URL to authorize:");
+		console.log(authUrl);
+		console.log("");
+		console.log("After authorizing, you'll be redirected to a page that won't load.");
+		console.log("Copy the URL from your browser's address bar and paste it here.");
+		console.log("");
+
+		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+		return new Promise((resolve) => {
+			rl.question("Paste redirect URL: ", async (input) => {
+				rl.close();
+				try {
+					const parsed = url.parse(input, true);
+					const code = parsed.query.code as string;
+					if (!code) {
+						resolve({ success: false, error: "No authorization code found in URL" });
+						return;
+					}
+					const { tokens } = await this.oauth2Client.getToken(code);
+					resolve({ success: true, refreshToken: tokens.refresh_token || undefined });
+				} catch (e) {
+					resolve({ success: false, error: e instanceof Error ? e.message : String(e) });
+				}
+			});
+		});
 	}
 
 	private startAuthFlow(): Promise<AuthResult> {
@@ -52,7 +90,7 @@ export class GmailOAuthFlow {
 				this.oauth2Client = new OAuth2Client(
 					this.oauth2Client._clientId,
 					this.oauth2Client._clientSecret,
-					redirectUri
+					redirectUri,
 				);
 
 				const authUrl = this.oauth2Client.generateAuthUrl({
@@ -60,11 +98,9 @@ export class GmailOAuthFlow {
 					scope: SCOPES,
 				});
 
-				console.log(`Starting OAuth flow on port ${port}...`);
 				console.log("Opening browser for Gmail authorization...");
 				console.log("If browser doesn't open, visit this URL:");
 				console.log(authUrl);
-
 				this.openBrowser(authUrl);
 
 				this.timeoutId = setTimeout(() => {
@@ -84,7 +120,7 @@ export class GmailOAuthFlow {
 	private async handleCallback(
 		query: any,
 		res: http.ServerResponse,
-		resolve: (result: AuthResult) => void
+		resolve: (result: AuthResult) => void,
 	): Promise<void> {
 		if (query.error) {
 			res.writeHead(200, { "Content-Type": "text/html" });

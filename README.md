@@ -1,27 +1,11 @@
 # gmcli
 
-Minimal Gmail CLI for searching, reading threads, managing labels, and drafts. Outputs human-readable text by default, or JSON with `--json` for composability with other tools.
+Minimal Gmail CLI for searching, reading threads, managing labels, drafts, and sending emails.
 
-## Quick Start
+## Install
 
 ```bash
-# Install
 npm install -g @mariozechner/gmcli
-
-# Set OAuth credentials once (see Setup below)
-gmcli accounts credentials ~/path/to/credentials.json
-
-# Add account (opens browser for OAuth)
-gmcli accounts add you@gmail.com
-
-# Search
-gmcli search you@gmail.com "is:unread"
-
-# Get thread
-gmcli thread you@gmail.com <threadId>
-
-# JSON output for piping
-gmcli --json search you@gmail.com "from:someone@example.com" | jq '.threads[0]'
 ```
 
 ## Setup
@@ -30,167 +14,179 @@ Before adding an account, you need OAuth2 credentials from Google Cloud Console:
 
 1. [Create a new project](https://console.cloud.google.com/projectcreate) (or select existing)
 2. [Enable the Gmail API](https://console.cloud.google.com/apis/api/gmail.googleapis.com)
-3. [Configure OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent):
-   - Choose "External" user type
-   - Fill in app name and your email
-   - Add all Gmail addresses you want to use with gmcli as test users
-4. [Create OAuth client](https://console.cloud.google.com/auth/clients):
+3. [Set app name](https://console.cloud.google.com/auth/branding) in OAuth branding
+4. [Add test users](https://console.cloud.google.com/auth/audience) (all Gmail addresses you want to use with gmcli)
+5. [Create OAuth client](https://console.cloud.google.com/auth/clients):
    - Click "Create Client"
    - Application type: "Desktop app"
    - Download the JSON file
+
+Then:
+
+```bash
+gmcli accounts credentials ~/path/to/credentials.json
+gmcli accounts add you@gmail.com
+```
+
+## Usage
+
+```
+gmcli accounts <action>                Account management
+gmcli <email> <command> [options]      Gmail operations
+```
 
 ## Commands
 
 ### accounts
 
 ```bash
-# Set OAuth credentials (once, shared by all accounts)
-gmcli accounts credentials <credentials.json>
-
-# List configured accounts
-gmcli accounts list
-
-# Add account (opens browser for OAuth)
-gmcli accounts add <email>
-
-# Remove account
-gmcli accounts remove <email>
+gmcli accounts credentials <file.json>   # Set OAuth credentials (once)
+gmcli accounts list                      # List configured accounts
+gmcli accounts add <email>               # Add account (opens browser)
+gmcli accounts add <email> --manual      # Add account (browserless, paste redirect URL)
+gmcli accounts remove <email>            # Remove account
 ```
 
 ### search
 
-Search threads using Gmail query syntax.
+Search threads using Gmail query syntax. Returns thread ID, date, sender, subject, and labels.
 
 ```bash
-gmcli search <email> <query> [--max N] [--page TOKEN]
+gmcli <email> search <query> [--max N] [--page TOKEN]
 ```
 
-Common queries:
+Query examples:
+- `in:inbox`, `in:sent`, `in:drafts`, `in:trash`, `in:spam`
+- `is:unread`, `is:starred`, `is:important`
+- `from:sender@example.com`, `to:recipient@example.com`
+- `subject:keyword`
+- `has:attachment`, `filename:pdf`
+- `after:2024/01/01`, `before:2024/12/31`
+- `label:Work`, `label:UNREAD`
+- Combine with spaces: `in:inbox is:unread from:boss@company.com`
 
+Examples:
 ```bash
-# Inbox
-gmcli search you@gmail.com "in:inbox"
-
-# Unread
-gmcli search you@gmail.com "is:unread"
-
-# Starred
-gmcli search you@gmail.com "is:starred"
-
-# By label
-gmcli search you@gmail.com "label:work"
-
-# From sender
-gmcli search you@gmail.com "from:boss@company.com"
-
-# With attachment
-gmcli search you@gmail.com "has:attachment"
-
-# Date range
-gmcli search you@gmail.com "after:2024/01/01 before:2024/12/31"
-
-# Combined
-gmcli search you@gmail.com "in:inbox is:unread from:someone@example.com"
-
-# More results
-gmcli search you@gmail.com "in:inbox" --max 50
+gmcli you@gmail.com search "in:inbox"
+gmcli you@gmail.com search "is:unread" --max 50
+gmcli you@gmail.com search "from:someone@example.com has:attachment"
 ```
 
 ### thread
 
-Get a complete thread with all messages.
+Get a thread with all messages. Shows Message-ID, headers, body, and attachments for each message.
 
 ```bash
-gmcli thread <email> <threadId>
-
-# Download all attachments to ~/.gmcli/attachments/
-gmcli thread <email> <threadId> --download
+gmcli <email> thread <threadId>              # View thread
+gmcli <email> thread <threadId> --download   # Download attachments
 ```
+
+Attachments are saved to `~/.gmcli/attachments/`.
 
 ### labels
 
-Modify labels on threads. Use comma-separated values for multiple labels.
-
 ```bash
-gmcli labels <email> <threadIds...> [--add LABELS] [--remove LABELS]
+gmcli <email> labels list                              # List all labels (ID, name, type)
+gmcli <email> labels <threadIds...> [--add L] [--remove L]  # Modify labels on threads
 ```
 
-Common operations:
-
-```bash
-# Mark as read
-gmcli labels you@gmail.com abc123 --remove UNREAD
-
-# Mark as unread
-gmcli labels you@gmail.com abc123 --add UNREAD
-
-# Archive (remove from inbox)
-gmcli labels you@gmail.com abc123 --remove INBOX
-
-# Unarchive (move back to inbox)
-gmcli labels you@gmail.com abc123 --add INBOX
-
-# Star
-gmcli labels you@gmail.com abc123 --add STARRED
-
-# Unstar
-gmcli labels you@gmail.com abc123 --remove STARRED
-
-# Add custom label
-gmcli labels you@gmail.com abc123 --add Label_123
-
-# Remove custom label
-gmcli labels you@gmail.com abc123 --remove Label_123
-
-# Multiple operations
-gmcli labels you@gmail.com abc123 --add STARRED --remove UNREAD,INBOX
-
-# Multiple threads
-gmcli labels you@gmail.com abc123 def456 ghi789 --remove UNREAD
-```
+You can use label names or IDs when modifying (names are case-insensitive).
 
 System labels: `INBOX`, `UNREAD`, `STARRED`, `IMPORTANT`, `TRASH`, `SPAM`
+
+Examples:
+```bash
+gmcli you@gmail.com labels list
+gmcli you@gmail.com labels abc123 --remove UNREAD
+gmcli you@gmail.com labels abc123 --add Work --remove INBOX
+gmcli you@gmail.com labels abc123 def456 --add STARRED
+```
 
 ### drafts
 
 ```bash
-# List drafts
-gmcli drafts <email> list
+gmcli <email> drafts list                      # List all drafts
+gmcli <email> drafts get <draftId>             # View draft with attachments
+gmcli <email> drafts get <draftId> --download  # Download draft attachments
+gmcli <email> drafts delete <draftId>          # Delete draft
+gmcli <email> drafts send <draftId>            # Send draft
 
-# Get draft
-gmcli drafts <email> get <draftId>
-
-# Delete draft
-gmcli drafts <email> delete <draftId>
-
-# Create draft
-gmcli drafts <email> create --to user@example.com --subject "Hello" --body "Content"
-
-# Create with CC/BCC (comma-separated for multiple)
-gmcli drafts <email> create --to a@x.com,b@x.com --cc c@x.com --subject "Hi" --body "Text"
+gmcli <email> drafts create --to <emails> --subject <s> --body <b> [options]
 ```
 
-## JSON Output
+### send
 
-Add `--json` before the command for machine-readable output:
+Send an email directly.
 
 ```bash
-gmcli --json accounts list
-gmcli --json search you@gmail.com "is:starred"
-gmcli --json thread you@gmail.com abc123
+gmcli <email> send --to <emails> --subject <s> --body <b> [options]
+```
+
+Options for `drafts create` and `send`:
+- `--to <emails>` - Recipients (comma-separated, required)
+- `--subject <s>` - Subject line (required)
+- `--body <b>` - Message body (required)
+- `--cc <emails>` - CC recipients (comma-separated)
+- `--bcc <emails>` - BCC recipients (comma-separated)
+- `--reply-to <messageId>` - Reply to message (sets In-Reply-To/References headers and thread)
+- `--attach <file>` - Attach file (can be used multiple times)
+
+Examples:
+```bash
+# Create draft
+gmcli you@gmail.com drafts create --to a@x.com --subject "Hi" --body "Hello"
+
+# Create reply draft
+gmcli you@gmail.com drafts create --to a@x.com --subject "Re: Topic" \
+    --body "My reply" --reply-to 19aea1f2f3532db5
+
+# Send draft
+gmcli you@gmail.com drafts send r1234567890
+
+# Send directly
+gmcli you@gmail.com send --to a@x.com --subject "Hi" --body "Hello"
+
+# Send reply with attachment
+gmcli you@gmail.com send --to a@x.com --subject "Re: Topic" \
+    --body "See attached" --reply-to 19aea1f2f3532db5 --attach doc.pdf
+```
+
+### url
+
+Generate Gmail web URLs for threads. Uses canonical URL format with email parameter (works regardless of account order in browser).
+
+```bash
+gmcli <email> url <threadIds...>
+```
+
+Example:
+```bash
+gmcli you@gmail.com url 19aea1f2f3532db5 19aea1f2f3532db6
 ```
 
 ## Data Storage
 
-- Credentials: `~/.gmcli/credentials.json`
-- Accounts: `~/.gmcli/accounts.json`
-- Attachments: `~/.gmcli/attachments/`
+All data is stored in `~/.gmcli/`:
+- `credentials.json` - OAuth client credentials
+- `accounts.json` - Account tokens
+- `attachments/` - Downloaded attachments
 
 ## Development
 
 ```bash
 npm install
-npx tsx src/cli.ts accounts list
+npm run build
+npm run check
+```
+
+## Publishing
+
+```bash
+# Update version in package.json and CHANGELOG.md
+npm run build
+npm publish --access public
+git tag v<version>
+git push --tags
 ```
 
 ## License

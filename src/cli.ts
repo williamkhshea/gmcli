@@ -9,51 +9,104 @@ const service = new GmailService();
 function usage(): never {
 	console.log(`gmcli - Gmail CLI
 
-Usage: gmcli [--json] <command> [options]
+USAGE
 
-Commands:
-  accounts credentials <file.json>  Set OAuth credentials (once)
-  accounts list                     List configured accounts
-  accounts add <email>              Add account
-  accounts remove <email>           Remove account
+  gmcli accounts <action>                    Account management
+  gmcli <email> <command> [options]          Gmail operations
 
-  search <email> <query> [--max N] [--page TOKEN]
-                                    Search threads (Gmail query syntax)
+ACCOUNT COMMANDS
 
-  thread <email> <threadId> [--download]
-                                    Get thread (--download saves attachments)
+  gmcli accounts credentials <file.json>     Set OAuth credentials (once)
+  gmcli accounts list                        List configured accounts
+  gmcli accounts add <email> [--manual]      Add account (--manual for browserless OAuth)
+  gmcli accounts remove <email>              Remove account
 
-  labels <email> <threadIds...> [--add LABELS] [--remove LABELS]
-                                    Modify thread labels (comma-separated)
+GMAIL COMMANDS
 
-  drafts <email> list               List drafts
-  drafts <email> get <draftId>      Get draft
-  drafts <email> delete <draftId>   Delete draft
-  drafts <email> create --to <emails> --subject <subj> --body <body>
-                                    Create draft
+  gmcli <email> search <query> [--max N] [--page TOKEN]
+      Search threads using Gmail query syntax.
+      Returns: thread ID, date, sender, subject, labels.
 
-Options:
-  --json                            Output JSON (default: minimal text)
-  --help                            Show this help`);
+      Query examples:
+        in:inbox, in:sent, in:drafts, in:trash
+        is:unread, is:starred, is:important
+        from:sender@example.com, to:recipient@example.com
+        subject:keyword, has:attachment, filename:pdf
+        after:2024/01/01, before:2024/12/31
+        label:Work, label:UNREAD
+        Combine: "in:inbox is:unread from:boss@company.com"
+
+  gmcli <email> thread <threadId> [--download]
+      Get thread with all messages.
+      Shows: Message-ID, headers, body, attachments.
+      --download saves attachments to ~/.gmcli/attachments/
+
+  gmcli <email> labels list
+      List all labels with ID, name, and type.
+
+  gmcli <email> labels <threadIds...> [--add L] [--remove L]
+      Modify labels on threads (comma-separated for multiple).
+      Accepts label names or IDs (names are case-insensitive).
+      System labels: INBOX, UNREAD, STARRED, IMPORTANT, TRASH, SPAM
+
+  gmcli <email> drafts list
+      List all drafts. Returns: draft ID, message ID.
+
+  gmcli <email> drafts get <draftId> [--download]
+      View draft with attachments.
+      --download saves attachments to ~/.gmcli/attachments/
+
+  gmcli <email> drafts delete <draftId>
+      Delete a draft.
+
+  gmcli <email> drafts send <draftId>
+      Send a draft.
+
+  gmcli <email> drafts create --to <emails> --subject <s> --body <b> [options]
+      Create a new draft.
+
+  gmcli <email> send --to <emails> --subject <s> --body <b> [options]
+      Send an email directly.
+
+      Options for drafts create / send:
+        --to <emails>           Recipients (comma-separated, required)
+        --subject <s>           Subject line (required)
+        --body <b>              Message body (required)
+        --cc <emails>           CC recipients (comma-separated)
+        --bcc <emails>          BCC recipients (comma-separated)
+        --reply-to <messageId>  Reply to message (sets headers and thread)
+        --attach <file>         Attach file (use multiple times for multiple files)
+
+  gmcli <email> url <threadIds...>
+      Generate Gmail web URLs for threads.
+      Uses canonical URL format with email parameter.
+
+EXAMPLES
+
+  gmcli accounts list
+  gmcli you@gmail.com search "in:inbox is:unread"
+  gmcli you@gmail.com search "from:boss@company.com" --max 50
+  gmcli you@gmail.com thread 19aea1f2f3532db5
+  gmcli you@gmail.com thread 19aea1f2f3532db5 --download
+  gmcli you@gmail.com labels list
+  gmcli you@gmail.com labels abc123 --add Work --remove UNREAD
+  gmcli you@gmail.com drafts create --to a@x.com --subject "Hi" --body "Hello"
+  gmcli you@gmail.com drafts send r1234567890
+  gmcli you@gmail.com send --to a@x.com --subject "Hi" --body "Hello"
+  gmcli you@gmail.com send --to a@x.com --subject "Re: Topic" \\
+      --body "Reply text" --reply-to 19aea1f2f3532db5 --attach file.pdf
+  gmcli you@gmail.com url 19aea1f2f3532db5 19aea1f2f3532db6
+
+DATA STORAGE
+
+  ~/.gmcli/credentials.json   OAuth client credentials
+  ~/.gmcli/accounts.json      Account tokens
+  ~/.gmcli/attachments/       Downloaded attachments`);
 	process.exit(1);
 }
 
-function output(data: any, json: boolean): void {
-	if (json) {
-		console.log(JSON.stringify(data, null, 2));
-	} else if (typeof data === "string") {
-		console.log(data);
-	} else {
-		console.log(JSON.stringify(data, null, 2));
-	}
-}
-
-function error(msg: string, json: boolean): never {
-	if (json) {
-		console.log(JSON.stringify({ error: msg }));
-	} else {
-		console.error("Error:", msg);
-	}
+function error(msg: string): never {
+	console.error("Error:", msg);
 	process.exit(1);
 }
 
@@ -63,47 +116,60 @@ async function main() {
 		usage();
 	}
 
-	const jsonFlag = args.includes("--json");
-	const filteredArgs = args.filter((a) => a !== "--json");
-
-	const command = filteredArgs[0];
-	const rest = filteredArgs.slice(1);
+	const first = args[0];
+	const rest = args.slice(1);
 
 	try {
+		// Handle 'accounts' command separately (no email required)
+		if (first === "accounts") {
+			await handleAccounts(rest);
+			return;
+		}
+
+		// All other commands: first arg is email, second is command
+		const account = first;
+		const command = rest[0];
+		const commandArgs = rest.slice(1);
+
+		if (!command) {
+			error("Missing command. Use --help for usage.");
+		}
+
 		switch (command) {
-			case "accounts":
-				await handleAccounts(rest, jsonFlag);
-				break;
 			case "search":
-				await handleSearch(rest, jsonFlag);
+				await handleSearch(account, commandArgs);
 				break;
 			case "thread":
-				await handleThread(rest, jsonFlag);
+				await handleThread(account, commandArgs);
 				break;
 			case "labels":
-				await handleLabels(rest, jsonFlag);
+				await handleLabels(account, commandArgs);
 				break;
 			case "drafts":
-				await handleDrafts(rest, jsonFlag);
+				await handleDrafts(account, commandArgs);
+				break;
+			case "send":
+				await handleSend(account, commandArgs);
+				break;
+			case "url":
+				handleUrl(account, commandArgs);
 				break;
 			default:
-				error(`Unknown command: ${command}`, jsonFlag);
+				error(`Unknown command: ${command}`);
 		}
 	} catch (e) {
-		error(e instanceof Error ? e.message : String(e), jsonFlag);
+		error(e instanceof Error ? e.message : String(e));
 	}
 }
 
-async function handleAccounts(args: string[], json: boolean) {
+async function handleAccounts(args: string[]) {
 	const action = args[0];
-	if (!action) error("Missing action: list|add|remove|credentials", json);
+	if (!action) error("Missing action: list|add|remove|credentials");
 
 	switch (action) {
 		case "list": {
 			const accounts = service.listAccounts();
-			if (json) {
-				output(accounts.map((a) => a.email), json);
-			} else if (accounts.length === 0) {
+			if (accounts.length === 0) {
 				console.log("No accounts configured");
 			} else {
 				for (const a of accounts) {
@@ -114,40 +180,38 @@ async function handleAccounts(args: string[], json: boolean) {
 		}
 		case "credentials": {
 			const credFile = args[1];
-			if (!credFile) error("Usage: accounts credentials <credentials.json>", json);
+			if (!credFile) error("Usage: accounts credentials <credentials.json>");
 			const creds = JSON.parse(fs.readFileSync(credFile, "utf8"));
 			const installed = creds.installed || creds.web;
-			if (!installed) error("Invalid credentials file", json);
+			if (!installed) error("Invalid credentials file");
 			service.setCredentials(installed.client_id, installed.client_secret);
-			output(json ? { success: true } : "Credentials saved", json);
+			console.log("Credentials saved");
 			break;
 		}
 		case "add": {
-			const email = args[1];
-			if (!email) {
-				error("Usage: accounts add <email>", json);
-			}
+			const manual = args.includes("--manual");
+			const filtered = args.slice(1).filter((a) => a !== "--manual");
+			const email = filtered[0];
+			if (!email) error("Usage: accounts add <email> [--manual]");
 			const creds = service.getCredentials();
-			if (!creds) {
-				error("No credentials configured. Run: gmcli accounts credentials <credentials.json>", json);
-			}
-			await service.addGmailAccount(email, creds.clientId, creds.clientSecret);
-			output(json ? { success: true, email } : `Account '${email}' added`, json);
+			if (!creds) error("No credentials configured. Run: gmcli accounts credentials <credentials.json>");
+			await service.addGmailAccount(email, creds.clientId, creds.clientSecret, manual);
+			console.log(`Account '${email}' added`);
 			break;
 		}
 		case "remove": {
 			const email = args[1];
-			if (!email) error("Usage: accounts remove <email>", json);
+			if (!email) error("Usage: accounts remove <email>");
 			const deleted = service.deleteAccount(email);
-			output(json ? { success: deleted, email } : (deleted ? `Removed '${email}'` : `Not found: ${email}`), json);
+			console.log(deleted ? `Removed '${email}'` : `Not found: ${email}`);
 			break;
 		}
 		default:
-			error(`Unknown action: ${action}`, json);
+			error(`Unknown action: ${action}`);
 	}
 }
 
-async function handleSearch(args: string[], json: boolean) {
+async function handleSearch(account: string, args: string[]) {
 	const { values, positionals } = parseArgs({
 		args,
 		options: {
@@ -157,45 +221,40 @@ async function handleSearch(args: string[], json: boolean) {
 		allowPositionals: true,
 	});
 
-	const [account, ...queryParts] = positionals;
-	const query = queryParts.join(" ");
-	if (!account || !query) error("Usage: search <account> <query>", json);
+	const query = positionals.join(" ");
+	if (!query) error("Usage: <email> search <query>");
 
 	const results = await service.searchThreads(account, query, Number(values.max) || 10, values.page);
+	const { idToName } = await service.getLabelMap(account);
 
-	if (json) {
-		output(results, json);
+	if (results.threads.length === 0) {
+		console.log("No results");
 	} else {
-		if (results.threads.length === 0) {
-			console.log("No results");
-		} else {
-			console.log("ID\tDATE\tFROM\tSUBJECT");
-			for (const t of results.threads) {
-				const msg = t.messages[0];
-				const date = msg?.date ? new Date(msg.date).toISOString().slice(0, 16).replace("T", " ") : "";
-				const from = msg?.from?.replace(/\t/g, " ") || "";
-				const subject = msg?.subject?.replace(/\t/g, " ") || "(no subject)";
-				console.log(`${t.id}\t${date}\t${from}\t${subject}`);
-			}
-			if (results.nextPageToken) {
-				console.log(`\n# Next page: --page ${results.nextPageToken}`);
-			}
+		console.log("ID\tDATE\tFROM\tSUBJECT\tLABELS");
+		for (const t of results.threads) {
+			const msg = t.messages[0];
+			const date = msg?.date ? new Date(msg.date).toISOString().slice(0, 16).replace("T", " ") : "";
+			const from = msg?.from?.replace(/\t/g, " ") || "";
+			const subject = msg?.subject?.replace(/\t/g, " ") || "(no subject)";
+			const labels = msg?.labelIds?.map((id) => idToName.get(id) || id).join(",") || "";
+			console.log(`${t.id}\t${date}\t${from}\t${subject}\t${labels}`);
+		}
+		if (results.nextPageToken) {
+			console.log(`\n# Next page: --page ${results.nextPageToken}`);
 		}
 	}
 }
 
-async function handleThread(args: string[], json: boolean) {
+async function handleThread(account: string, args: string[]) {
 	const download = args.includes("--download");
 	const filtered = args.filter((a) => a !== "--download");
-	const [account, threadId] = filtered;
+	const threadId = filtered[0];
 
-	if (!account || !threadId) error("Usage: thread <account> <threadId>", json);
+	if (!threadId) error("Usage: <email> thread <threadId>");
 
 	const result = await service.getThread(account, threadId, download);
 
-	if (json) {
-		output(result, json);
-	} else if (download) {
+	if (download) {
 		const attachments = result as any[];
 		if (attachments.length === 0) {
 			console.log("No attachments");
@@ -209,7 +268,9 @@ async function handleThread(args: string[], json: boolean) {
 		const thread = result as any;
 		for (const msg of thread.messages || []) {
 			const headers = msg.payload?.headers || [];
-			const getHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
+			const getHeader = (name: string) =>
+				headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
+			console.log(`Message-ID: ${msg.id}`);
 			console.log(`From: ${getHeader("from")}`);
 			console.log(`To: ${getHeader("to")}`);
 			console.log(`Date: ${getHeader("date")}`);
@@ -219,12 +280,22 @@ async function handleThread(args: string[], json: boolean) {
 			console.log("");
 			const attachments = getAttachments(msg.payload);
 			if (attachments.length > 0) {
-				console.log("Attachments: " + attachments.join(", "));
+				console.log("Attachments:");
+				for (const att of attachments) {
+					console.log(`  - ${att.filename} (${formatSize(att.size)}, ${att.mimeType})`);
+				}
 				console.log("");
 			}
 			console.log("---");
 		}
 	}
+}
+
+function formatSize(bytes: number): string {
+	if (bytes === 0) return "0 B";
+	const units = ["B", "KB", "MB", "GB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(1024));
+	return `${(bytes / 1024 ** i).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
 function decodeBody(payload: any): string {
@@ -246,19 +317,29 @@ function decodeBody(payload: any): string {
 	return "";
 }
 
-function getAttachments(payload: any): string[] {
-	const attachments: string[] = [];
+interface AttachmentInfo {
+	filename: string;
+	size: number;
+	mimeType: string;
+}
+
+function getAttachments(payload: any): AttachmentInfo[] {
+	const attachments: AttachmentInfo[] = [];
 	if (!payload?.parts) return attachments;
 	for (const part of payload.parts) {
 		if (part.filename && part.body?.attachmentId) {
-			attachments.push(part.filename);
+			attachments.push({
+				filename: part.filename,
+				size: part.body.size || 0,
+				mimeType: part.mimeType || "application/octet-stream",
+			});
 		}
 		attachments.push(...getAttachments(part));
 	}
 	return attachments;
 }
 
-async function handleLabels(args: string[], json: boolean) {
+async function handleLabels(account: string, args: string[]) {
 	const { values, positionals } = parseArgs({
 		args,
 		options: {
@@ -268,47 +349,104 @@ async function handleLabels(args: string[], json: boolean) {
 		allowPositionals: true,
 	});
 
-	const [account, ...threadIds] = positionals;
-	if (!account || threadIds.length === 0) {
-		error("Usage: labels <account> <threadIds...> [--add LABELS] [--remove LABELS]", json);
+	if (positionals.length === 0) {
+		error("Usage: <email> labels list | <email> labels <threadIds...> [--add L] [--remove L]");
 	}
 
-	const addLabels = values.add ? values.add.split(",") : [];
-	const removeLabels = values.remove ? values.remove.split(",") : [];
+	// labels list
+	if (positionals[0] === "list") {
+		const labels = await service.listLabels(account);
+		console.log("ID\tNAME\tTYPE");
+		for (const l of labels) {
+			console.log(`${l.id}\t${l.name}\t${l.type}`);
+		}
+		return;
+	}
+
+	// labels <threadIds...> [--add] [--remove]
+	const threadIds = positionals;
+
+	const { nameToId } = await service.getLabelMap(account);
+	const addLabels = values.add ? service.resolveLabelIds(values.add.split(","), nameToId) : [];
+	const removeLabels = values.remove ? service.resolveLabelIds(values.remove.split(","), nameToId) : [];
 
 	const results = await service.modifyLabels(account, threadIds, addLabels, removeLabels);
 
-	if (json) {
-		output(results, json);
-	} else {
-		for (const r of results) {
-			console.log(`${r.threadId}: ${r.success ? "ok" : r.error}`);
-		}
+	for (const r of results) {
+		console.log(`${r.threadId}: ${r.success ? "ok" : r.error}`);
 	}
 }
 
-async function handleDrafts(args: string[], json: boolean) {
-	const [account, action, ...rest] = args;
-	if (!account || !action) error("Usage: drafts <account> <action>", json);
+async function handleDrafts(account: string, args: string[]) {
+	const action = args[0];
+	const rest = args.slice(1);
+	if (!action) error("Usage: <email> drafts <action>");
 
 	switch (action) {
 		case "list": {
 			const drafts = await service.listDrafts(account);
-			output(drafts, json);
+			if (drafts.length === 0) {
+				console.log("No drafts");
+			} else {
+				console.log("ID\tMESSAGE_ID");
+				for (const d of drafts) {
+					console.log(`${d.id}\t${d.message?.id || ""}`);
+				}
+			}
 			break;
 		}
 		case "get": {
-			const draftId = rest[0];
-			if (!draftId) error("Usage: drafts <account> get <draftId>", json);
+			const download = rest.includes("--download");
+			const filtered = rest.filter((a) => a !== "--download");
+			const draftId = filtered[0];
+			if (!draftId) error("Usage: <email> drafts get <draftId> [--download]");
 			const draft = await service.getDraft(account, draftId);
-			output(draft, json);
+			const msg = draft.message;
+			if (msg) {
+				if (download) {
+					const downloaded = await service.downloadMessageAttachments(account, msg.id!);
+					if (downloaded.length === 0) {
+						console.log("No attachments");
+					} else {
+						console.log("FILENAME\tPATH\tSIZE");
+						for (const a of downloaded) {
+							console.log(`${a.filename}\t${a.path}\t${a.size}`);
+						}
+					}
+				} else {
+					const headers = msg.payload?.headers || [];
+					const getHeader = (name: string) =>
+						headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
+					console.log(`Draft-ID: ${draft.id}`);
+					console.log(`To: ${getHeader("to")}`);
+					console.log(`Cc: ${getHeader("cc")}`);
+					console.log(`Subject: ${getHeader("subject")}`);
+					console.log("");
+					console.log(decodeBody(msg.payload));
+					console.log("");
+					const attachments = getAttachments(msg.payload);
+					if (attachments.length > 0) {
+						console.log("Attachments:");
+						for (const att of attachments) {
+							console.log(`  - ${att.filename} (${formatSize(att.size)}, ${att.mimeType})`);
+						}
+					}
+				}
+			}
 			break;
 		}
 		case "delete": {
 			const draftId = rest[0];
-			if (!draftId) error("Usage: drafts <account> delete <draftId>", json);
+			if (!draftId) error("Usage: <email> drafts delete <draftId>");
 			await service.deleteDraft(account, draftId);
-			output(json ? { success: true } : "Deleted", json);
+			console.log("Deleted");
+			break;
+		}
+		case "send": {
+			const draftId = rest[0];
+			if (!draftId) error("Usage: <email> drafts send <draftId>");
+			const msg = await service.sendDraft(account, draftId);
+			console.log(`Sent: ${msg.id}`);
 			break;
 		}
 		case "create": {
@@ -321,27 +459,63 @@ async function handleDrafts(args: string[], json: boolean) {
 					subject: { type: "string" },
 					body: { type: "string" },
 					thread: { type: "string" },
+					"reply-to": { type: "string" },
+					attach: { type: "string", multiple: true },
 				},
 			});
 			if (!values.to || !values.subject || !values.body) {
-				error("Usage: drafts <account> create --to <emails> --subject <subj> --body <body>", json);
+				error("Usage: <email> drafts create --to <emails> --subject <subj> --body <body>");
 			}
-			const draft = await service.createDraft(
-				account,
-				values.to.split(","),
-				values.subject,
-				values.body,
-				{
-					cc: values.cc?.split(","),
-					bcc: values.bcc?.split(","),
-					threadId: values.thread,
-				}
-			);
-			output(draft, json);
+			const draft = await service.createDraft(account, values.to.split(","), values.subject, values.body, {
+				cc: values.cc?.split(","),
+				bcc: values.bcc?.split(","),
+				threadId: values.thread,
+				replyToMessageId: values["reply-to"],
+				attachments: values.attach,
+			});
+			console.log(`Draft created: ${draft.id}`);
 			break;
 		}
 		default:
-			error(`Unknown action: ${action}`, json);
+			error(`Unknown action: ${action}`);
+	}
+}
+
+async function handleSend(account: string, args: string[]) {
+	const { values } = parseArgs({
+		args,
+		options: {
+			to: { type: "string" },
+			cc: { type: "string" },
+			bcc: { type: "string" },
+			subject: { type: "string" },
+			body: { type: "string" },
+			"reply-to": { type: "string" },
+			attach: { type: "string", multiple: true },
+		},
+	});
+
+	if (!values.to || !values.subject || !values.body) {
+		error("Usage: <email> send --to <emails> --subject <subj> --body <body>");
+	}
+
+	const msg = await service.sendMessage(account, values.to.split(","), values.subject, values.body, {
+		cc: values.cc?.split(","),
+		bcc: values.bcc?.split(","),
+		replyToMessageId: values["reply-to"],
+		attachments: values.attach,
+	});
+	console.log(`Sent: ${msg.id}`);
+}
+
+function handleUrl(account: string, args: string[]) {
+	if (args.length === 0) {
+		error("Usage: <email> url <threadIds...>");
+	}
+
+	for (const id of args) {
+		const url = `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#all/${id}`;
+		console.log(`${id}\t${url}`);
 	}
 }
 

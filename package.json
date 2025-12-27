@@ -1,5 +1,5 @@
 {
-	"name": "@mariozechner/gmcli",
+	"name": "@williamkhshea/gmcli",
 	"version": "0.1.1",
 	"description": "Minimal Gmail CLI",
 	"type": "module",

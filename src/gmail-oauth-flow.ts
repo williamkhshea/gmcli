@@ -164,7 +164,11 @@ export class GmailOAuthFlow {
 	}
 
 	private openBrowser(url: string): void {
-		const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		spawn(cmd, [url], { detached: true, stdio: "ignore" });
+		if (process.platform === "win32") {
+			spawn("cmd.exe", ["/c", "start", "", url], { detached: true, stdio: "ignore" });
+		} else {
+			const cmd = process.platform === "darwin" ? "open" : "xdg-open";
+			spawn(cmd, [url], { detached: true, stdio: "ignore" });
+		}
 	}
 }

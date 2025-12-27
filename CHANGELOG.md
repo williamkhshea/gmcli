@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Fix `--reply-to` to accept both thread IDs and message IDs
+  - Previously required a message ID; now also accepts thread IDs from search results
+  - When given a thread ID, automatically uses the last message in the thread
+- Fix `spawn start ENOENT` error on Windows when adding account
+  - Use `cmd.exe /c start` instead of spawning `start` directly
+
 ## 0.1.0
 
 Initial release.

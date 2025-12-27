@@ -525,7 +525,7 @@ export class GmailService {
 			userId: "me",
 			requestBody: { id: draftId },
 		});
-		return response.data.message!;
+		return response.data as unknown as GmailMessage;
 	}
 
 	async sendMessage(

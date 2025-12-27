@@ -7,6 +7,8 @@
   - When given a thread ID, automatically uses the last message in the thread
 - Fix `spawn start ENOENT` error on Windows when adding account
   - Use `cmd.exe /c start` instead of spawning `start` directly
+- Fix `sendDraft` returning undefined and crashing on `.id` access
+  - API returns Message directly in `response.data`, not `response.data.message`
 
 ## 0.1.0
 
